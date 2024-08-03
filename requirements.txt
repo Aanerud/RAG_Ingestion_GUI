@@ -1,6 +1,7 @@
 PyQt5
 elasticsearch
-http.client
 dateutil
 ollama
 pywin32
+configparser
+unittest

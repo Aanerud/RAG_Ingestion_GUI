@@ -70,7 +70,9 @@
 - **message_preprocessing.py**: Provides functions for preprocessing messages and extracting notes and dates.
 - **outlook_client.py**: Handles interactions with Outlook using `pywin32`.
 - **gui.py**: Implements the PyQt-based GUI.
+- **config.ini**: Configuration file for hardcoded values.
 - **requirements.txt**: Lists the required Python packages.
+- **test_message_preprocessing.py**: Contains unit tests for critical functions and classes.
 
 ## Contributing
 
