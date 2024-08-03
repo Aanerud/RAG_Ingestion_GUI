@@ -2,12 +2,12 @@
 
 ## Overview
 
-**RAG Ingestion GUI** is a Python-based application that creates a Retrieval-Augmented Generation (RAG) database by ingesting messages from the BlueBubbles API and storing them in an Elasticsearch instance. The application features a PyQt-based GUI for easy interaction and management.
+**RAG Ingestion GUI** is a Python-based application that creates a Retrieval-Augmented Generation (RAG) database by ingesting messages from the BlueBubbles API and emails from Outlook, storing them in an Elasticsearch instance. The application features a PyQt-based GUI for easy interaction and management.
 
 ## Features
 
-- Fetches messages from the BlueBubbles API.
-- Extracts and stores notes and dates from messages.
+- Fetches messages from the BlueBubbles API and emails from Outlook.
+- Extracts and stores notes and dates from messages and emails.
 - Uses the Ollama model for text embedding.
 - Stores enriched data in Elasticsearch.
 - Provides a user-friendly GUI for managing the ingestion process.
@@ -16,13 +16,14 @@
 
 - Python 3.8+
 - Docker (for running Elasticsearch)
+- Microsoft Outlook (for email integration)
 
 ## Installation
 
 1. Clone the repository:
 
     ```sh
-    git clone https://github.com/Aanerud/rag-ingestion-gui.git
+    git clone https://github.com/yourusername/rag-ingestion-gui.git
     cd rag-ingestion-gui
     ```
 
@@ -67,6 +68,7 @@
 - **api_client.py**: Contains the `BlueBubblesAPI` class for interacting with the BlueBubbles API.
 - **elasticsearch_client.py**: Contains the `ElasticsearchClient` class for managing Elasticsearch operations.
 - **message_preprocessing.py**: Provides functions for preprocessing messages and extracting notes and dates.
+- **outlook_client.py**: Handles interactions with Outlook using `pywin32`.
 - **gui.py**: Implements the PyQt-based GUI.
 - **requirements.txt**: Lists the required Python packages.
 

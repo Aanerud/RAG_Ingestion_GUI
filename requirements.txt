@@ -3,3 +3,4 @@ elasticsearch
 http.client
 dateutil
 ollama
+pywin32

@@ -14,7 +14,6 @@ def extract_notes(text):
 
 def extract_dates(text):
     dates = []
-    # Simple date pattern matching, can be expanded with more sophisticated NLP techniques
     date_patterns = re.findall(r'\b\d{1,2}[\/\-\.\s]\d{1,2}[\/\-\.\s]\d{2,4}\b', text)
     for date_str in date_patterns:
         try:
@@ -31,9 +30,24 @@ def preprocess_message(message, api):
     return {
         'text': text,
         'message_vector': embedding,
-        'sender': message['handle']['address'],
-        'date_sent': datetime.fromtimestamp(message['dateCreated'] / 1000),
-        'is_from_me': message['isFromMe'],
+        'sender': message.get('sender', 'unknown'),
+        'date_sent': datetime.fromtimestamp(message['date_sent'] / 1000),
+        'is_from_me': message.get('is_from_me', False),
+        'notes': notes,
+        'dates': dates
+    }
+
+def preprocess_email(email, api):
+    text = email['body']
+    embedding = api.embed_text(text)
+    notes = extract_notes(text)
+    dates = extract_dates(text)
+    return {
+        'text': text,
+        'message_vector': embedding,
+        'sender': email['sender'],
+        'date_sent': email['received'],
+        'is_from_me': False,
         'notes': notes,
         'dates': dates
     }

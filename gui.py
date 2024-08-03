@@ -2,7 +2,8 @@ import sys
 from PyQt5.QtWidgets import QApplication, QWidget, QLabel, QLineEdit, QPushButton, QVBoxLayout, QTextEdit, QMessageBox
 from api_client import BlueBubblesAPI
 from elasticsearch_client import ElasticsearchClient
-from message_preprocessing import preprocess_message
+from message_preprocessing import preprocess_message, preprocess_email
+from outlook_client import get_emails, init_outlook
 
 class App(QWidget):
     def __init__(self):
@@ -60,6 +61,7 @@ class App(QWidget):
         self.log('Starting ingestion process...')
         
         try:
+            # Ingest BlueBubbles messages
             contacts = api.get_contacts()
             for contact in contacts['data']:
                 index_name = contact['address']
@@ -71,7 +73,20 @@ class App(QWidget):
                 for message in messages['data']:
                     processed_message = preprocess_message(message, api)
                     es_client.store_message(index_name, processed_message)
-            
+
+            # Ingest Outlook emails
+            EMAILADDRESS = "your_email@example.com"
+            IGNORESENDER = ["ignored_sender@example.com"]
+            monitored_subjects = ["subject1", "subject2"]
+
+            accounts, outlook = init_outlook()
+            emails = get_emails(accounts, outlook, monitored_subjects, IGNORESENDER)
+            for email in emails:
+                index_name = email['sender']
+                es_client.create_index(index_name)
+                processed_email = preprocess_email(email, api)
+                es_client.store_message(index_name, processed_email)
+
             self.log('Ingestion process completed successfully.')
         except Exception as e:
             self.log(f'Error during ingestion process: {str(e)}')
