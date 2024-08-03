@@ -1,7 +1,8 @@
 PyQt5
 elasticsearch
-dateutil
+numpy
+python-dateutil
 ollama
 pywin32
 configparser
-unittest
+requests
