@@ -79,23 +79,41 @@ class MessageFetchThread(QThread):
             logger.info(f"No contacts found for query '{self.query}'.")
             return
 
-        emails = []
-        phone_numbers = []
+        addresses = []
         for result in results:
-            emails.extend(result['_source'].get('emails', []))
-            phone_numbers.extend(result['_source'].get('phoneNumbers', []))
+            addresses.extend(result['_source'].get('emails', []))
+            addresses.extend(result['_source'].get('phoneNumbers', []))
         
-        emails = list(set(emails))
-        phone_numbers = list(set(phone_numbers))
+        addresses = list(set(addresses))
 
-        if not emails and not phone_numbers:
-            self.log_signal.emit(f"No emails or phone numbers found for query '{self.query}'.")
-            logger.info(f"No emails or phone numbers found for query '{self.query}'.")
+        if not addresses:
+            self.log_signal.emit(f"No addresses found for query '{self.query}'.")
+            logger.info(f"No addresses found for query '{self.query}'.")
             return
 
-        logger.info(f"Querying messages for emails: {emails} and phone numbers: {phone_numbers}")
-        messages_response = self.api.query_messages(phone_numbers, emails)
+        handle_ids = []
+        for address in addresses:
+            try:
+                handle_response = self.api.get_handle_by_address(address)
+                handle_data = handle_response.get('data', [])
+                handle_ids.extend([handle['originalROWID'] for handle in handle_data])
+            except requests.exceptions.RequestException as e:
+                logger.error(f"Error fetching handle for address {address}: {str(e)}")
+
+        if not handle_ids:
+            self.log_signal.emit(f"No handle IDs found for query '{self.query}'.")
+            logger.info(f"No handle IDs found for query '{self.query}'.")
+            return
+
+        logger.info(f"Querying messages for handle IDs: {handle_ids}")
+        messages_response = self.api.query_messages(handle_ids)
         messages = messages_response.get('data', [])
+
+        for result in results:
+            contact_id = result['_id']
+            contact_messages = [msg for msg in messages if msg['handle_id'] in handle_ids]
+            contact_messages = [{"date": msg["date"], "text": msg["text"]} for msg in contact_messages]
+            self.es_client.update_contact(contact_id, contact_messages)
 
         self.log_signal.emit(f"Found {len(messages)} messages for query '{self.query}'.")
         logger.info(f"Found {len(messages)} messages for query '{self.query}'.")

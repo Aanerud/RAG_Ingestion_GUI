@@ -70,3 +70,14 @@ class ElasticsearchClient:
         }
         response = self.client.search(index=self.index_name, body=search_query)
         return response['hits']['hits']
+
+    def update_contact(self, contact_id, messages):
+        self.client.update(
+            index=self.index_name,
+            id=contact_id,
+            body={
+                "doc": {
+                    "messages": messages
+                }
+            }
+        )
