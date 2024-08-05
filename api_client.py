@@ -31,15 +31,16 @@ class BlueBubblesAPI:
         response.raise_for_status()
         return response.json()
 
-    def query_messages(self, handle_ids):
+    def query_messages(self, handle_id):
         payload = {
-            "limit": 1000,
+            "limit": 10,
             "offset": 0,
             "with": ["chat", "chat.participants", "attachment", "handle"],
             "where": [{
-                "statement": "message.handle_id IN (:...handle_ids)",
-                "args": {"handle_ids": handle_ids}
-            }]
+                "statement": "message.handle_id = :id",
+                "args": {"id": handle_id}
+            }],
+            "sort": "DESC"
         }
 
         logger.info("Querying messages with payload: %s", payload)
@@ -48,7 +49,8 @@ class BlueBubblesAPI:
         return response.json()
 
     def get_handle_by_address(self, address):
-        logger.info(f"Fetching handle by address: {address}")
-        response = requests.post(f"{self.host}/api/v1/handle/query?password={self.password}", json={"addresses": [address]})
+        normalized_address = address.replace(" ", "")
+        logger.info(f"Fetching handle by address: {normalized_address}")
+        response = requests.get(f"{self.host}/api/v1/handle/{normalized_address}?password={self.password}")
         response.raise_for_status()
         return response.json()

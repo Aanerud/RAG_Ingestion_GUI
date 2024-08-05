@@ -19,3 +19,8 @@ def preprocess_contact(contact):
         'contactInfo': contact  # Store the full vCard information dynamically
     }
     return contact_info
+
+def format_message(message, person_name):
+    from_name = "me" if message['isFromMe'] else person_name
+    text = message.get('text', '')
+    return f"From: {from_name}\nText: {text}\n"

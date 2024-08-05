@@ -1,10 +1,11 @@
 import sys
 import re
+import requests
 from PyQt5.QtWidgets import QApplication, QWidget, QLabel, QLineEdit, QPushButton, QVBoxLayout, QTextEdit, QMessageBox
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from api_client import BlueBubblesAPI
 from elasticsearch_client import ElasticsearchClient
-from message_preprocessing import preprocess_contact
+from message_preprocessing import preprocess_contact, format_message
 import logging
 import configparser
 
@@ -79,46 +80,70 @@ class MessageFetchThread(QThread):
             logger.info(f"No contacts found for query '{self.query}'.")
             return
 
-        addresses = []
+        correct_contact = None
         for result in results:
-            addresses.extend(result['_source'].get('emails', []))
-            addresses.extend(result['_source'].get('phoneNumbers', []))
+            if self.query.lower() in [email.lower() for email in result['_source'].get('emails', [])] or \
+               self.query.lower() in [phone.lower() for phone in result['_source'].get('phoneNumbers', [])]:
+                correct_contact = result['_source']
+                break
         
-        addresses = list(set(addresses))
-
-        if not addresses:
-            self.log_signal.emit(f"No addresses found for query '{self.query}'.")
-            logger.info(f"No addresses found for query '{self.query}'.")
+        if not correct_contact:
+            self.log_signal.emit(f"No exact contact found for query '{self.query}'.")
+            logger.info(f"No exact contact found for query '{self.query}'.")
             return
 
+        person_name = f"{correct_contact.get('firstName', '')} {correct_contact.get('lastName', '')}".strip()
+        addresses = correct_contact.get('emails', []) + correct_contact.get('phoneNumbers', [])
+        existing_handles = {addr['address']: addr.get('handle') for addr in correct_contact.get('contactInfo', {}).get('emails', []) + correct_contact.get('contactInfo', {}).get('phoneNumbers', [])}
+        
         handle_ids = []
         for address in addresses:
-            try:
-                handle_response = self.api.get_handle_by_address(address)
-                handle_data = handle_response.get('data', [])
-                handle_ids.extend([handle['originalROWID'] for handle in handle_data])
-            except requests.exceptions.RequestException as e:
-                logger.error(f"Error fetching handle for address {address}: {str(e)}")
-
+            if existing_handles.get(address):
+                handle_ids.append(existing_handles[address])
+                self.log_signal.emit(f"Found handle for address {address}")
+                logger.info(f"Found handle for address {address}")
+            else:
+                try:
+                    handle_response = self.api.get_handle_by_address(address)
+                    handle_data = handle_response.get('data', {})
+                    if handle_data:
+                        handle_ids.append(handle_data['originalROWID'])
+                        existing_handles[address] = handle_data['originalROWID']
+                        self.log_signal.emit(f"Found handle for address {address}")
+                        logger.info(f"Found handle for address {address}")
+                    else:
+                        self.log_signal.emit(f"Handle not found for address {address}")
+                        logger.info(f"Handle not found for address {address}")
+                except requests.exceptions.RequestException as e:
+                    logger.error(f"Error fetching handle for address {address}: {str(e)}")
+        
         if not handle_ids:
             self.log_signal.emit(f"No handle IDs found for query '{self.query}'.")
             logger.info(f"No handle IDs found for query '{self.query}'.")
             return
 
         logger.info(f"Querying messages for handle IDs: {handle_ids}")
-        messages_response = self.api.query_messages(handle_ids)
-        messages = messages_response.get('data', [])
 
-        for result in results:
-            contact_id = result['_id']
-            contact_messages = [msg for msg in messages if msg['handle_id'] in handle_ids]
-            contact_messages = [{"date": msg["date"], "text": msg["text"]} for msg in contact_messages]
-            self.es_client.update_contact(contact_id, contact_messages)
+        all_messages = []
+        for handle_id in handle_ids:
+            try:
+                messages_response = self.api.query_messages(handle_id)
+                all_messages.extend(messages_response.get('data', []))
+            except requests.exceptions.RequestException as e:
+                logger.error(f"Error querying messages for handle ID {handle_id}: {str(e)}")
 
-        self.log_signal.emit(f"Found {len(messages)} messages for query '{self.query}'.")
-        logger.info(f"Found {len(messages)} messages for query '{self.query}'.")
-        for message in messages[:10]:  # Print the first 10 messages in the console
-            print(message)
+        # Sort messages by dateCreated and take the last 10
+        all_messages = sorted(all_messages, key=lambda x: x['dateCreated'], reverse=True)[:10]
+
+        # Update the contact in Elasticsearch with the handle IDs
+        self.es_client.update_contact_handles(correct_contact['id'], existing_handles)
+
+        self.log_signal.emit(f"Found {len(all_messages)} messages for query '{self.query}'.")
+        logger.info(f"Found {len(all_messages)} messages for query '{self.query}'.")
+        for message in all_messages:
+            formatted_message = format_message(message, person_name)
+            print(formatted_message)
+            self.log_signal.emit(formatted_message)
 
 class App(QWidget):
     def __init__(self):
