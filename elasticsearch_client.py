@@ -8,9 +8,8 @@ logger = logging.getLogger(__name__)
 class ElasticsearchClient:
     def __init__(self, host="http://localhost:9200"):
         self.client = Elasticsearch(hosts=[host])
-        self.index_name = "contacts"
 
-    def create_index(self):
+    def create_index(self, index_name):
         index_mapping = {
             "mappings": {
                 "properties": {
@@ -46,17 +45,15 @@ class ElasticsearchClient:
                         "dims": 1536,
                         "index": True,
                         "similarity": "cosine"
-                    },
-                    "blob_id": {"type": "keyword"},
-                    "blob": {"type": "text"}
+                    }
                 }
             }
         }
-        if not self.client.indices.exists(index=self.index_name):
-            self.client.indices.create(index=self.index_name, body=index_mapping)
+        if not self.client.indices.exists(index=index_name):
+            self.client.indices.create(index=index_name, body=index_mapping)
 
-    def store_contact(self, contact):
-        self.client.index(index=self.index_name, id=contact['id'], document=contact)
+    def store_contact(self, index_name, contact):
+        self.client.index(index=index_name, id=contact['id'], document=contact)
 
     def generate_unique_id(self, contact):
         unique_string = f"{contact['firstName']}{contact['lastName']}{contact.get('emails', '')}{contact.get('phoneNumbers', '')}"
@@ -71,10 +68,10 @@ class ElasticsearchClient:
                 }
             }
         }
-        response = self.client.search(index=self.index_name, body=search_query)
+        response = self.client.search(index="contacts_*", body=search_query)
         return response['hits']['hits']
 
-    def update_contact_handles(self, contact_id, handles):
+    def update_contact_handles(self, index_name, contact_id, handles):
         update_body = {
             "doc": {
                 "contactInfo": {
@@ -82,18 +79,21 @@ class ElasticsearchClient:
                 }
             }
         }
-        self.client.update(index=self.index_name, id=contact_id, body=update_body)
+        self.client.update(index=index_name, id=contact_id, body=update_body)
 
-    def store_message_blob(self, blob_id, blob):
-        self.client.index(index=self.index_name, id=blob_id, document={"blob_id": blob_id, "blob": blob})
+    def store_message_blob(self, index_name, blob_id, blob):
+        self.client.index(index=index_name, id=blob_id, document={"message_blob": blob})
 
     def fetch_message_blobs(self, contact_id):
         search_query = {
             "query": {
                 "wildcard": {
-                    "blob_id": f"{contact_id}_blob_*"
+                    "_id": f"{contact_id}_blob_*"
                 }
-            }
+            },
+            "sort": [
+                {"_id": {"order": "asc"}}
+            ]
         }
-        response = self.client.search(index=self.index_name, body=search_query)
-        return [hit['_source']['blob'] for hit in response['hits']['hits']]
+        response = self.client.search(index="contacts_*", body=search_query, size=1000)
+        return [hit['_source']['message_blob'] for hit in response['hits']['hits']]

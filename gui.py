@@ -13,7 +13,7 @@ import configparser
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-class IngestionThread(QThread):
+class IngestionAndFetchThread(QThread):
     log_signal = pyqtSignal(str)
 
     def __init__(self, api, es_client):
@@ -23,78 +23,51 @@ class IngestionThread(QThread):
 
     def run(self):
         try:
-            self.ingest_contacts()
-            self.log_signal.emit('Ingestion process completed successfully.')
-            logger.info('Ingestion process completed successfully.')
+            self.ingest_contacts_and_fetch_messages()
+            self.log_signal.emit('Process completed successfully.')
+            logger.info('Process completed successfully.')
         except Exception as e:
-            error_msg = f'Error during ingestion process: {str(e)}'
+            error_msg = f'Error during the process: {str(e)}'
             self.log_signal.emit(error_msg)
             logger.error(error_msg)
 
-    def ingest_contacts(self):
+    def ingest_contacts_and_fetch_messages(self):
         try:
             contacts = self.api.get_contacts()
             num_contacts = len(contacts['data'])
             self.log_signal.emit(f"Identified {num_contacts} contacts.")
             logger.info(f"Identified {num_contacts} contacts.")
-            for contact in contacts['data']:
-                unique_id = self.es_client.generate_unique_id(contact)
-                contact_info = preprocess_contact(contact)
-                contact_info['id'] = unique_id
+            
+            # Split contacts into groups of 1000
+            contact_groups = [contacts['data'][i:i + 1000] for i in range(0, len(contacts['data']), 1000)]
+            for group_idx, contact_group in enumerate(contact_groups):
+                index_name = f"contacts_{group_idx}"
+                self.es_client.create_index(index_name)
+                
+                for contact in contact_group:
+                    unique_id = self.es_client.generate_unique_id(contact)
+                    contact_info = preprocess_contact(contact)
+                    contact_info['id'] = unique_id
 
-                self.es_client.create_index()
-                self.log_signal.emit(f"Storing contact with ID: {unique_id}")
-                logger.info(f"Storing contact with ID: {unique_id}")
+                    self.log_signal.emit(f"Storing contact with ID: {unique_id}")
+                    logger.info(f"Storing contact with ID: {unique_id}")
 
-                self.es_client.store_contact(contact_info)
-                self.log_signal.emit(f"Stored contact with ID: {unique_id}")
-                logger.info(f"Stored contact with ID: {unique_id}")
+                    self.es_client.store_contact(index_name, contact_info)
+                    self.log_signal.emit(f"Stored contact with ID: {unique_id}")
+                    logger.info(f"Stored contact with ID: {unique_id}")
 
-            self.log_signal.emit('Contacts ingestion completed successfully.')
-            logger.info('Contacts ingestion completed successfully.')
+                    # Fetch and store messages for each contact
+                    self.fetch_and_store_messages(contact_info, index_name)
+
+            self.log_signal.emit('Contacts ingestion and message fetching completed successfully.')
+            logger.info('Contacts ingestion and message fetching completed successfully.')
         except Exception as e:
-            logger.error(f'Error during contacts ingestion: {str(e)}')
+            logger.error(f'Error during contacts ingestion and message fetching: {str(e)}')
             raise
 
-class MessageFetchThread(QThread):
-    log_signal = pyqtSignal(str)
-
-    def __init__(self, api, es_client, query):
-        super().__init__()
-        self.api = api
-        self.es_client = es_client
-        self.query = query
-
-    def run(self):
-        try:
-            self.fetch_messages()
-        except Exception as e:
-            error_msg = f'Error during message fetch process: {str(e)}'
-            self.log_signal.emit(error_msg)
-            logger.error(error_msg)
-
-    def fetch_messages(self):
-        results = self.es_client.search_contacts(self.query)
-        if not results:
-            self.log_signal.emit(f"No contacts found for query '{self.query}'.")
-            logger.info(f"No contacts found for query '{self.query}'.")
-            return
-
-        correct_contact = None
-        for result in results:
-            if self.query.lower() in [email.lower() for email in result['_source'].get('emails', [])] or \
-               self.query.lower() in [phone.lower() for phone in result['_source'].get('phoneNumbers', [])]:
-                correct_contact = result['_source']
-                break
-        
-        if not correct_contact:
-            self.log_signal.emit(f"No exact contact found for query '{self.query}'.")
-            logger.info(f"No exact contact found for query '{self.query}'.")
-            return
-
-        person_name = f"{correct_contact.get('firstName', '')} {correct_contact.get('lastName', '')}".strip()
-        addresses = correct_contact.get('emails', []) + correct_contact.get('phoneNumbers', [])
-        existing_handles = {addr['address']: addr.get('handle') for addr in correct_contact.get('contactInfo', {}).get('emails', []) + correct_contact.get('contactInfo', {}).get('phoneNumbers', [])}
+    def fetch_and_store_messages(self, contact_info, index_name):
+        addresses = contact_info.get('emails', []) + contact_info.get('phoneNumbers', [])
+        existing_handles = {addr['address']: addr.get('handle') for addr in contact_info.get('contactInfo', {}).get('emails', []) + contact_info.get('contactInfo', {}).get('phoneNumbers', [])}
         
         handle_ids = []
         for address in addresses:
@@ -118,8 +91,8 @@ class MessageFetchThread(QThread):
                     logger.error(f"Error fetching handle for address {address}: {str(e)}")
         
         if not handle_ids:
-            self.log_signal.emit(f"No handle IDs found for query '{self.query}'.")
-            logger.info(f"No handle IDs found for query '{self.query}'.")
+            self.log_signal.emit(f"No handle IDs found for contact '{contact_info['id']}'.")
+            logger.info(f"No handle IDs found for contact '{contact_info['id']}'.")
             return
 
         logger.info(f"Querying messages for handle IDs: {handle_ids}")
@@ -143,15 +116,15 @@ class MessageFetchThread(QThread):
         all_messages = sorted(all_messages, key=lambda x: x['dateCreated'], reverse=True)
         blob_size = 1000
         for i in range(0, len(all_messages), blob_size):
-            blob_id = f"{correct_contact['id']}_blob_{i // blob_size}"
-            blob = "\n".join([format_message(msg, person_name) for msg in all_messages[i:i+blob_size]])
-            self.es_client.store_message_blob(blob_id, blob)
+            blob_id = f"{contact_info['id']}_blob_{i // blob_size}"
+            blob = "\n".join([format_message(msg, contact_info['displayName']) for msg in all_messages[i:i+blob_size]])
+            self.es_client.store_message_blob(index_name, blob_id, blob)
 
         # Update the contact in Elasticsearch with the handle IDs
-        self.es_client.update_contact_handles(correct_contact['id'], existing_handles)
+        self.es_client.update_contact_handles(index_name, contact_info['id'], existing_handles)
 
-        self.log_signal.emit(f"Found {len(all_messages)} messages for query '{self.query}'.")
-        logger.info(f"Found {len(all_messages)} messages for query '{self.query}'.")
+        self.log_signal.emit(f"Stored {len(all_messages)} messages for contact '{contact_info['id']}'.")
+        logger.info(f"Stored {len(all_messages)} messages for contact '{contact_info['id']}'.")
 
 class MessageDownloadThread(QThread):
     log_signal = pyqtSignal(str)
@@ -238,9 +211,9 @@ class App(QWidget):
         self.log_text.setReadOnly(True)
         layout.addWidget(self.log_text)
         
-        self.ingest_button = QPushButton('Create People Containers with BlueBubbles Contacts', self)
-        self.ingest_button.clicked.connect(self.start_ingestion)
-        layout.addWidget(self.ingest_button)
+        self.process_button = QPushButton('Start Full Process', self)
+        self.process_button.clicked.connect(self.start_process)
+        layout.addWidget(self.process_button)
 
         self.search_label = QLabel('Search Contacts:')
         layout.addWidget(self.search_label)
@@ -251,18 +224,14 @@ class App(QWidget):
         self.search_button.clicked.connect(self.search_contacts)
         layout.addWidget(self.search_button)
 
-        self.message_label = QLabel('Fetch all iMessages from a given person:')
+        self.message_label = QLabel('Download Messages for Email/Phone:')
         layout.addWidget(self.message_label)
         self.message_input = QLineEdit(self)
         layout.addWidget(self.message_input)
 
-        self.message_button = QPushButton('Fetch Messages', self)
-        self.message_button.clicked.connect(self.fetch_messages)
+        self.message_button = QPushButton('Download Messages', self)
+        self.message_button.clicked.connect(self.download_messages)
         layout.addWidget(self.message_button)
-
-        self.download_button = QPushButton('Download Messages', self)
-        self.download_button.clicked.connect(self.download_messages)
-        layout.addWidget(self.download_button)
 
         self.setLayout(layout)
         self.load_config()
@@ -280,21 +249,21 @@ class App(QWidget):
             self.elastic_host_input.setText(config['Elasticsearch'].get('HOST', ''))
 
     def validate_inputs(self):
-        self.host_input.textChanged.connect(self.update_ingest_button_state)
-        self.password_input.textChanged.connect(self.update_ingest_button_state)
-        self.elastic_host_input.textChanged.connect(self.update_ingest_button_state)
-        self.update_ingest_button_state()
+        self.host_input.textChanged.connect(self.update_process_button_state)
+        self.password_input.textChanged.connect(self.update_process_button_state)
+        self.elastic_host_input.textChanged.connect(self.update_process_button_state)
+        self.update_process_button_state()
 
-    def update_ingest_button_state(self):
+    def update_process_button_state(self):
         if self.host_input.text() and self.password_input.text() and self.elastic_host_input.text():
-            self.ingest_button.setEnabled(True)
+            self.process_button.setEnabled(True)
         else:
-            self.ingest_button.setEnabled(False)
+            self.process_button.setEnabled(False)
 
     def log(self, message):
         self.log_text.append(message)
 
-    def start_ingestion(self):
+    def start_process(self):
         host = self.host_input.text()
         password = self.password_input.text()
         elastic_host = self.elastic_host_input.text()
@@ -303,13 +272,13 @@ class App(QWidget):
             QMessageBox.warning(self, 'Input Error', 'Please provide all required inputs.')
             return
 
-        self.log('Starting ingestion process...')
-        logger.info('Starting ingestion process...')
+        self.log('Starting full process...')
+        logger.info('Starting full process...')
         
         api = BlueBubblesAPI(host, password)
         es_client = ElasticsearchClient(elastic_host)
 
-        self.thread = IngestionThread(api, es_client)
+        self.thread = IngestionAndFetchThread(api, es_client)
         self.thread.log_signal.connect(self.log)
         self.thread.start()
 
@@ -327,26 +296,6 @@ class App(QWidget):
         for result in results:
             self.log(f"ID: {result['_id']}, Source: {result['_source']}")
 
-    def fetch_messages(self):
-        host = self.host_input.text()
-        password = self.password_input.text()
-        elastic_host = self.elastic_host_input.text()
-        query = self.message_input.text()
-
-        if not host or not password or not elastic_host or not query:
-            QMessageBox.warning(self, 'Input Error', 'Please provide all required inputs.')
-            return
-
-        self.log('Fetching messages...')
-        logger.info('Fetching messages...')
-        
-        api = BlueBubblesAPI(host, password)
-        es_client = ElasticsearchClient(elastic_host)
-
-        self.thread = MessageFetchThread(api, es_client, query)
-        self.thread.log_signal.connect(self.log)
-        self.thread.start()
-
     def download_messages(self):
         elastic_host = self.elastic_host_input.text()
         query = self.message_input.text()
@@ -357,7 +306,7 @@ class App(QWidget):
 
         self.log('Downloading messages...')
         logger.info('Downloading messages...')
-
+        
         es_client = ElasticsearchClient(elastic_host)
 
         self.thread = MessageDownloadThread(es_client, query)
