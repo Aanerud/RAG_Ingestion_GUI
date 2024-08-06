@@ -48,6 +48,23 @@ class BlueBubblesAPI:
         response.raise_for_status()
         return response.json()
 
+    def query_messages_with_pagination(self, handle_id, offset):
+        payload = {
+            "limit": 1000,
+            "offset": offset,
+            "with": ["chat", "chat.participants", "attachment", "handle"],
+            "where": [{
+                "statement": "message.handle_id = :id",
+                "args": {"id": handle_id}
+            }],
+            "sort": "DESC"
+        }
+
+        logger.info("Querying messages with pagination payload: %s", payload)
+        response = requests.post(f"{self.host}/api/v1/message/query?password={self.password}", json=payload)
+        response.raise_for_status()
+        return response.json()
+
     def get_handle_by_address(self, address):
         normalized_address = address.replace(" ", "")
         logger.info(f"Fetching handle by address: {normalized_address}")

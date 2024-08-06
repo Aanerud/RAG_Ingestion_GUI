@@ -1,4 +1,5 @@
 import numpy as np
+from datetime import datetime
 
 def preprocess_contact(contact):
     # Prepare the contact information in vCard format
@@ -23,4 +24,5 @@ def preprocess_contact(contact):
 def format_message(message, person_name):
     from_name = "me" if message['isFromMe'] else person_name
     text = message.get('text', '')
-    return f"From: {from_name}\nText: {text}\n"
+    date = datetime.fromtimestamp(message['dateCreated'] / 1000.0).strftime('%Y-%m-%d %H:%M:%S')
+    return f"From: {from_name}\nDate: {date}\nMessage: {text}\n"

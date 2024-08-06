@@ -37,6 +37,7 @@ class ElasticsearchClient:
                         "type": "object",
                         "properties": {
                             "id": {"type": "keyword"},
+                            "handles": {"type": "object"}
                         }
                     },
                     "notes": {"type": "text"},
@@ -45,7 +46,9 @@ class ElasticsearchClient:
                         "dims": 1536,
                         "index": True,
                         "similarity": "cosine"
-                    }
+                    },
+                    "blob_id": {"type": "keyword"},
+                    "blob": {"type": "text"}
                 }
             }
         }
@@ -80,3 +83,17 @@ class ElasticsearchClient:
             }
         }
         self.client.update(index=self.index_name, id=contact_id, body=update_body)
+
+    def store_message_blob(self, blob_id, blob):
+        self.client.index(index=self.index_name, id=blob_id, document={"blob_id": blob_id, "blob": blob})
+
+    def fetch_message_blobs(self, contact_id):
+        search_query = {
+            "query": {
+                "wildcard": {
+                    "blob_id": f"{contact_id}_blob_*"
+                }
+            }
+        }
+        response = self.client.search(index=self.index_name, body=search_query)
+        return [hit['_source']['blob'] for hit in response['hits']['hits']]
