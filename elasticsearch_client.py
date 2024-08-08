@@ -46,12 +46,15 @@ class ElasticsearchClient:
                         "dims": 1536,
                         "index": True,
                         "similarity": "cosine"
-                    }
+                    },
+                    "custom_blob_id": {"type": "keyword"},  # Define custom_blob_id as keyword
+                    "message_blob": {"type": "text"}
                 }
             }
         }
         if not self.client.indices.exists(index=index_name):
             self.client.indices.create(index=index_name, body=index_mapping)
+            logger.info(f"Created index: {index_name}")
 
     def store_contact(self, index_name, contact):
         self.client.index(index=index_name, id=contact['id'], document=contact)
@@ -84,18 +87,23 @@ class ElasticsearchClient:
         }
         self.client.update(index=index_name, id=contact_id, body=update_body)
 
-    def store_message_blob(self, index_name, blob_id, blob):
-        self.client.index(index=index_name, id=blob_id, document={"message_blob": blob})
+    def store_message_blob(self, index_name, contact_id, blob_id, blob):
+        document = {
+            "contact_id": contact_id,
+            "custom_blob_id": blob_id,
+            "message_blob": blob
+        }
+        self.client.index(index=index_name, id=blob_id, document=document)
 
     def fetch_message_blobs(self, contact_id):
         search_query = {
             "query": {
-                "wildcard": {
-                    "_id": f"{contact_id}_blob_*"
+                "term": {
+                    "contact_id": contact_id
                 }
             },
             "sort": [
-                {"_id": {"order": "asc"}}
+                {"custom_blob_id": {"order": "asc"}}
             ]
         }
         response = self.client.search(index="contacts_*", body=search_query, size=1000)

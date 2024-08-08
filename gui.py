@@ -120,7 +120,7 @@ class IngestionAndFetchThread(QThread):
         for i in range(0, len(all_messages), blob_size):
             blob_id = f"{contact_info['id']}_blob_{i // blob_size}"
             blob = "\n".join([format_message(msg, contact_info['displayName']) for msg in all_messages[i:i+blob_size]])
-            self.es_client.store_message_blob(index_name, blob_id, blob)
+            self.es_client.store_message_blob(index_name, contact_info['id'], blob_id, blob)
 
         # Update the contact in Elasticsearch with the handle IDs
         self.es_client.update_contact_handles(index_name, contact_info['id'], existing_handles)
@@ -286,17 +286,20 @@ class App(QWidget):
         for result in results:
             display_name = result['_source'].get('displayName', '')
             if display_name:
-                self.search_results.addItem(display_name)
+                from PyQt5 import QtWidgets
+                item = QtWidgets.QListWidgetItem(display_name)
+                item.setData(Qt.UserRole, result['_id'])
+                self.search_results.addItem(item)
 
     def select_contact(self, item):
+        self.selected_contact_id = item.data(Qt.UserRole)
         self.selected_contact_label.setText(f"Selected: {item.text()}")
         self.message_button.setEnabled(True)
-        self.selected_contact_id = item.data(Qt.UserRole)
         self.selected_contact_name = item.text()
 
     def download_messages(self):
         elastic_host = self.elastic_host_input.text()
-        if not elastic_host or not self.selected_contact_id:
+        if not elastic_host or not hasattr(self, 'selected_contact_id'):
             QMessageBox.warning(self, 'Input Error', 'Please provide all required inputs and select a contact.')
             return
 
