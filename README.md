@@ -11,11 +11,14 @@
 - Uses the Ollama model for text embedding.
 - Stores enriched data in Elasticsearch.
 - Provides a user-friendly GUI for managing the ingestion process.
+- Supports searching and autocompletion for contacts based on `displayName`.
+- Allows downloading messages for selected contacts.
 
 ## Requirements
 
 - Python 3.8+
 - Docker (for running Elasticsearch)
+- Bluebubbles running on a Mac, with Private API
 - Microsoft Outlook (for email integration)
 
 ## Installation
@@ -23,7 +26,7 @@
 1. Clone the repository:
 
     ```sh
-    git clone https://github.com/yourusername/rag-ingestion-gui.git
+    git clone https://github.com/aanerud/rag-ingestion-gui.git
     cd rag-ingestion-gui
     ```
 
@@ -60,7 +63,11 @@
     - **BlueBubbles Password**: The password for the BlueBubbles server.
     - **Elasticsearch Host**: The host address for the Elasticsearch server.
 
-3. Click the **Ingest Messages** button to start the ingestion process.
+3. Click the **Start Full Process** button to start the ingestion process.
+
+4. Use the **Search Contacts** input to type a name and select from the suggested results.
+
+5. Once a contact is selected, click the **Download Messages** button to download the messages for the selected contact.
 
 ## File Descriptions
 
