@@ -1,7 +1,8 @@
+# elasticsearch_client.py
+
 from elasticsearch import Elasticsearch
 import hashlib
 import logging
-import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -62,9 +63,11 @@ class ElasticsearchClient:
     def search_contacts(self, query):
         search_query = {
             "query": {
-                "multi_match": {
-                    "query": query,
-                    "fields": ["firstName", "lastName", "emails", "displayName", "company", "title", "addresses.address", "socialProfiles.url", "urls.url"]
+                "prefix": {
+                    "displayName": {
+                        "value": query,
+                        "case_insensitive": True
+                    }
                 }
             }
         }

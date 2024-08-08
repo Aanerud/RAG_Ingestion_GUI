@@ -1,7 +1,9 @@
+# gui.py
+
 import sys
 import re
 import requests
-from PyQt5.QtWidgets import QApplication, QWidget, QLabel, QLineEdit, QPushButton, QVBoxLayout, QTextEdit, QMessageBox, QFileDialog
+from PyQt5.QtWidgets import QApplication, QWidget, QLabel, QLineEdit, QPushButton, QVBoxLayout, QTextEdit, QMessageBox, QFileDialog, QListWidget, QCompleter
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from api_client import BlueBubblesAPI
 from elasticsearch_client import ElasticsearchClient
@@ -129,10 +131,11 @@ class IngestionAndFetchThread(QThread):
 class MessageDownloadThread(QThread):
     log_signal = pyqtSignal(str)
 
-    def __init__(self, es_client, query):
+    def __init__(self, es_client, contact_id, display_name):
         super().__init__()
         self.es_client = es_client
-        self.query = query
+        self.contact_id = contact_id
+        self.display_name = display_name
 
     def run(self):
         try:
@@ -143,31 +146,13 @@ class MessageDownloadThread(QThread):
             logger.error(error_msg)
 
     def download_messages(self):
-        results = self.es_client.search_contacts(self.query)
-        if not results:
-            self.log_signal.emit(f"No contacts found for query '{self.query}'.")
-            logger.info(f"No contacts found for query '{self.query}'.")
-            return
-
-        correct_contact = None
-        for result in results:
-            if self.query.lower() in [email.lower() for email in result['_source'].get('emails', [])] or \
-               self.query.lower() in [phone.lower() for phone in result['_source'].get('phoneNumbers', [])]:
-                correct_contact = result['_source']
-                break
-        
-        if not correct_contact:
-            self.log_signal.emit(f"No exact contact found for query '{self.query}'.")
-            logger.info(f"No exact contact found for query '{self.query}'.")
-            return
-
-        blobs = self.es_client.fetch_message_blobs(correct_contact['id'])
+        blobs = self.es_client.fetch_message_blobs(self.contact_id)
         if not blobs:
-            self.log_signal.emit(f"No message blobs found for contact '{correct_contact['id']}'.")
-            logger.info(f"No message blobs found for contact '{correct_contact['id']}'.")
+            self.log_signal.emit(f"No message blobs found for contact '{self.contact_id}'.")
+            logger.info(f"No message blobs found for contact '{self.contact_id}'.")
             return
 
-        file_path, _ = QFileDialog.getSaveFileName(None, "Save Messages As", f"{correct_contact['displayName']}_messages.txt", "Text Files (*.txt)")
+        file_path, _ = QFileDialog.getSaveFileName(None, "Save Messages As", f"{self.display_name}_messages.txt", "Text Files (*.txt)")
         if not file_path:
             self.log_signal.emit("Message download canceled.")
             logger.info("Message download canceled.")
@@ -219,19 +204,22 @@ class App(QWidget):
         layout.addWidget(self.search_label)
         self.search_input = QLineEdit(self)
         layout.addWidget(self.search_input)
+        self.search_input.textChanged.connect(self.update_suggestions)
 
-        self.search_button = QPushButton('Search', self)
-        self.search_button.clicked.connect(self.search_contacts)
-        layout.addWidget(self.search_button)
+        self.search_results = QListWidget(self)
+        self.search_results.itemClicked.connect(self.select_contact)
+        layout.addWidget(self.search_results)
 
-        self.message_label = QLabel('Download Messages for Email/Phone:')
+        self.message_label = QLabel('Download Messages for Selected Contact:')
         layout.addWidget(self.message_label)
-        self.message_input = QLineEdit(self)
-        layout.addWidget(self.message_input)
+
+        self.selected_contact_label = QLabel('')
+        layout.addWidget(self.selected_contact_label)
 
         self.message_button = QPushButton('Download Messages', self)
         self.message_button.clicked.connect(self.download_messages)
         layout.addWidget(self.message_button)
+        self.message_button.setEnabled(False)
 
         self.setLayout(layout)
         self.load_config()
@@ -282,26 +270,34 @@ class App(QWidget):
         self.thread.log_signal.connect(self.log)
         self.thread.start()
 
-    def search_contacts(self):
-        elastic_host = self.elastic_host_input.text()
+    def update_suggestions(self):
         query = self.search_input.text()
+        if len(query) < 3:
+            return
 
-        if not elastic_host or not query:
-            QMessageBox.warning(self, 'Input Error', 'Please provide all required inputs.')
+        elastic_host = self.elastic_host_input.text()
+        if not elastic_host:
+            QMessageBox.warning(self, 'Input Error', 'Please provide Elasticsearch host.')
             return
 
         es_client = ElasticsearchClient(elastic_host)
         results = es_client.search_contacts(query)
-        self.log(f"Found {len(results)} contacts matching '{query}':")
+        self.search_results.clear()
         for result in results:
-            self.log(f"ID: {result['_id']}, Source: {result['_source']}")
+            display_name = result['_source'].get('displayName', '')
+            if display_name:
+                self.search_results.addItem(display_name)
+
+    def select_contact(self, item):
+        self.selected_contact_label.setText(f"Selected: {item.text()}")
+        self.message_button.setEnabled(True)
+        self.selected_contact_id = item.data(Qt.UserRole)
+        self.selected_contact_name = item.text()
 
     def download_messages(self):
         elastic_host = self.elastic_host_input.text()
-        query = self.message_input.text()
-
-        if not elastic_host or not query:
-            QMessageBox.warning(self, 'Input Error', 'Please provide all required inputs.')
+        if not elastic_host or not self.selected_contact_id:
+            QMessageBox.warning(self, 'Input Error', 'Please provide all required inputs and select a contact.')
             return
 
         self.log('Downloading messages...')
@@ -309,7 +305,7 @@ class App(QWidget):
         
         es_client = ElasticsearchClient(elastic_host)
 
-        self.thread = MessageDownloadThread(es_client, query)
+        self.thread = MessageDownloadThread(es_client, self.selected_contact_id, self.selected_contact_name)
         self.thread.log_signal.connect(self.log)
         self.thread.start()
 
